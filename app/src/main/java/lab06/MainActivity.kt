@@ -66,6 +66,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.room.PrimaryKey
 import pl.wsei.pam.lab01.R
 import java.time.Instant
 import java.time.LocalDate
@@ -189,8 +190,9 @@ fun FormScreen(navController: NavController) {
             FloatingActionButton(
                 shape = CircleShape,
                 onClick = {
-                    // Here you'd typically save the task to your data source
+                    // Create a new task - id will be auto-generated due to autoGenerate = true
                     val newTask = TodoTask(
+                        // id is omitted here since it's set to autoGenerate = true in the data class
                         title = taskTitle,
                         deadline = selectedDate,
                         isDone = taskDone,
@@ -304,8 +306,10 @@ fun FormScreen(navController: NavController) {
                     modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
                 )
 
+                // Preview card now includes id (although 0 as it's a new task)
                 ListItem(
                     item = TodoTask(
+                        id = 0, // For preview, we use 0 as it would be auto-generated
                         title = if (taskTitle.isEmpty()) "Task Title" else taskTitle,
                         deadline = selectedDate,
                         isDone = taskDone,
@@ -328,6 +332,7 @@ fun FormScreen(navController: NavController) {
         }
     )
 }
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -367,12 +372,14 @@ fun DateDialogPicker(
     }
 }
 
+
+// Update todoTasks() function to include IDs
 fun todoTasks(): List<TodoTask> {
     return listOf(
-        TodoTask("Programming", LocalDate.of(2024, 4, 18), false, Priority.Low),
-        TodoTask("Teaching", LocalDate.of(2024, 5, 12), false, Priority.High),
-        TodoTask("Learning", LocalDate.of(2024, 6, 28), true, Priority.Low),
-        TodoTask("Cooking", LocalDate.of(2024, 8, 18), false, Priority.Medium),
+        TodoTask(id = 1, title = "Programming", deadline = LocalDate.of(2024, 4, 18), isDone = false, priority = Priority.Low),
+        TodoTask(id = 2, title = "Teaching", deadline = LocalDate.of(2024, 5, 12), isDone = false, priority = Priority.High),
+        TodoTask(id = 3, title = "Learning", deadline = LocalDate.of(2024, 6, 28), isDone = true, priority = Priority.Low),
+        TodoTask(id = 4, title = "Cooking", deadline = LocalDate.of(2024, 8, 18), isDone = false, priority = Priority.Medium),
     )
 }
 
@@ -381,6 +388,8 @@ enum class Priority() {
 }
 
 data class TodoTask(
+    @PrimaryKey(autoGenerate = true)
+    val id: Int = 0, //
     val title: String,
     val deadline: LocalDate,
     val isDone: Boolean,
@@ -402,6 +411,9 @@ fun ListItem(item: TodoTask, modifier: Modifier = Modifier) {
                 .fillMaxSize()
                 .padding(16.dp)
         ) {
+            // Optional: Display task ID (only for debugging/development)
+            // Text(text = "ID: ${item.id}", style = MaterialTheme.typography.labelSmall)
+
             // Main content row
             Row(
                 modifier = Modifier
