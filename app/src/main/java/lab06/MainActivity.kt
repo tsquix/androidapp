@@ -57,6 +57,7 @@ import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,7 +67,10 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.room.PrimaryKey
+import lab06.data.AppViewModelProvider
+import lab06.data.ListViewModel
 import pl.wsei.pam.lab01.R
 import java.time.Instant
 import java.time.LocalDate
@@ -120,18 +124,29 @@ fun MainAppPreview() {
 
 
 @Composable
-fun MainScreen(
-    listScreen: @Composable (NavController) -> Unit = { ListScreen(it) }
-) {
+fun MainScreen() {
     val navController = rememberNavController()
+
+    // The viewModel will be scoped to this composition
+    val viewModel: ListViewModel = viewModel(factory = AppViewModelProvider.Factory)
+
     NavHost(navController = navController, startDestination = "list") {
-        composable("list") { listScreen(navController) }
-        composable("form") { FormScreen(navController) }
+        composable("list") {
+            ListScreen(navController = navController, viewModel = viewModel)
+        }
+        composable("form") {
+            FormScreen(navController = navController, viewModel = viewModel)
+        }
     }
 }
 
 @Composable
-fun ListScreen(navController: NavController) {
+fun ListScreen(
+    navController: NavController,
+    viewModel: ListViewModel = viewModel(factory = AppViewModelProvider.Factory)
+) {
+    val listUiState by viewModel.listUiState.collectAsState()
+
     Scaffold(
         floatingActionButton = {
             FloatingActionButton(
@@ -156,21 +171,26 @@ fun ListScreen(navController: NavController) {
                 route = "form"
             )
         },
-        content = {
-            LazyColumn(modifier = Modifier.padding(it)) {
-                items(items = todoTasks()) { item ->
+        content = { paddingValues ->
+            LazyColumn(
+                modifier = Modifier.padding(paddingValues)
+            ) {
+                items(items = listUiState.items, key = { it.id }) { item ->
                     ListItem(item = item)
                 }
             }
         }
-
     )
 }
 
 
 
+
 @Composable
-fun FormScreen(navController: NavController) {
+fun FormScreen(
+    navController: NavController,
+    viewModel: ListViewModel = viewModel(factory = AppViewModelProvider.Factory)
+) {
     var taskTitle by remember { mutableStateOf("") }
     var selectedPriority by remember { mutableStateOf(Priority.Medium) }
     var taskDone by remember { mutableStateOf(false) }
@@ -190,16 +210,19 @@ fun FormScreen(navController: NavController) {
             FloatingActionButton(
                 shape = CircleShape,
                 onClick = {
-                    // Create a new task - id will be auto-generated due to autoGenerate = true
+                    // Create a new task
                     val newTask = TodoTask(
-                        // id is omitted here since it's set to autoGenerate = true in the data class
+                        // id will be handled by Room with autoGenerate = true
                         title = taskTitle,
                         deadline = selectedDate,
                         isDone = taskDone,
                         priority = selectedPriority
                     )
 
-                    // For demonstration purposes, just navigate back
+                    // Save the task using the ViewModel
+                    viewModel.saveTask(newTask)
+
+                    // Navigate back to the list
                     navController.navigate("list")
                 },
                 content = {
