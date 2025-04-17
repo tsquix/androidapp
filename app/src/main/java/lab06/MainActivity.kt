@@ -1,9 +1,20 @@
 package lab06
 
+import AppContainer
+import android.Manifest
+import android.app.AlarmManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Context.ALARM_SERVICE
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,7 +36,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -57,6 +67,7 @@ import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,10 +78,16 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.room.PrimaryKey
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
 import lab06.data.AppViewModelProvider
 import lab06.data.ListViewModel
+import lab06.data.NotificationBroadcastReceiver
+import lab06.data.TodoApplication
 import pl.wsei.pam.lab01.R
 import java.time.Instant
 import java.time.LocalDate
@@ -78,9 +95,18 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        lateinit var container: AppContainer
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        createNotificationChannel(this)
+        container = (this.application as TodoApplication).container
+        scheduleAlarm(this,2_000)
         enableEdgeToEdge()
+
+        container = (this.application as TodoApplication).container
         setContent {
             Lab01Theme {
                 Surface(
@@ -93,6 +119,60 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+const val notificationID = 121
+const val channelID = "Lab06 channel"
+const val titleExtra = "title"
+const val messageExtra = "message"
+private fun createNotificationChannel(context: Context) {
+    val name = "Lab06 channel"
+    val descriptionText = "Lab06 is channel for notifications for approaching tasks."
+    val importance = NotificationManager.IMPORTANCE_DEFAULT
+    val channel = NotificationChannel(channelID, name, importance).apply {
+        description = descriptionText
+    }
+    val notificationManager: NotificationManager =
+        context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    notificationManager.createNotificationChannel(channel)
+}
+
+fun scheduleAlarm(context: Context, time: Long) {
+    val intent = Intent(context, NotificationBroadcastReceiver::class.java)
+    intent.putExtra(titleExtra, "Deadline")
+    intent.putExtra(messageExtra, "Zbliża się termin zakończenia zadania")
+
+    val pendingIntent = PendingIntent.getBroadcast(
+        context,
+        notificationID,
+        intent,
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+    )
+
+    val alarmManager = context.getSystemService(ALARM_SERVICE) as AlarmManager
+
+    alarmManager.setExactAndAllowWhileIdle(
+        AlarmManager.RTC_WAKEUP,
+        time,
+        pendingIntent
+    )
+}
+
+
+class NotificationHandler(private val context: Context) {
+    private val notificationManager =
+        context.getSystemService(NotificationManager::class.java)
+    fun showSimpleNotification() {
+        val notification = NotificationCompat.Builder(context, channelID)
+            .setContentTitle("Proste powiadomienie")
+            .setContentText("Tekst powiadomienia")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setPriority(NotificationManager.IMPORTANCE_HIGH)
+            .setAutoCancel(true)
+            .build()
+        notificationManager.notify(notificationID, notification)
+    }
+}
+
+
 
 @Composable
 fun Greeting(name: String, modifier: Modifier = Modifier) {
@@ -122,11 +202,18 @@ fun MainAppPreview() {
     }
 }
 
-
+@RequiresApi(Build.VERSION_CODES.O)
+@OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun MainScreen() {
     val navController = rememberNavController()
-
+    val postNotificationPermission =
+        rememberPermissionState(permission = Manifest.permission.POST_NOTIFICATIONS)
+    LaunchedEffect(key1 = true) {
+        if (!postNotificationPermission.status.isGranted) {
+            postNotificationPermission.launchPermissionRequest()
+        }
+    }
     // The viewModel will be scoped to this composition
     val viewModel: ListViewModel = viewModel(factory = AppViewModelProvider.Factory)
 
@@ -530,6 +617,13 @@ fun AppTopBar(
         },
         actions = {
             if (route != "form") {
+                IconButton(onClick = {
+                    // Wysyłanie powiadomienia po kliknięciu w zębatkę
+                    MainActivity.container.notificationHandler.showSimpleNotification()
+                }) {
+                    Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
+                }
+
                 OutlinedButton(
                     onClick = { navController.navigate("list") }
                 ) {
@@ -538,14 +632,18 @@ fun AppTopBar(
                         fontSize = 18.sp
                     )
                 }
-            } else {
-                IconButton(onClick = { /*TODO*/ }) {
-                    Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
-                }
-                IconButton(onClick = { /*TODO*/ }) {
-                    Icon(imageVector = Icons.Default.Home, contentDescription = "Home")
-                }
             }
         }
     )
+
+//} else {
+//                IconButton(onClick = { /*TODO*/ }) {
+//                    Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
+//                }
+//                IconButton(onClick = { /*TODO*/ }) {
+//                    Icon(imageVector = Icons.Default.Home, contentDescription = "Home")
+//                }
+//            }
+//        }
+//    )
 }
