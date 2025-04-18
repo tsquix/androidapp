@@ -1,14 +1,15 @@
 import android.content.Context
 import lab06.NotificationHandler
+import lab06.alarm.TaskAlarmScheduler
 import lab06.data.AppDatabase
 import lab06.data.DatabaseTodoTaskRepository
 import lab06.data.TodoTaskRepository
-import java.time.LocalDate
+
 
 interface AppContainer {
     val todoTaskRepository: TodoTaskRepository
 
-
+    val taskAlarmScheduler: TaskAlarmScheduler
     val notificationHandler: NotificationHandler
 }
 
@@ -23,8 +24,8 @@ class AppDataContainer(private val context: Context) : AppContainer {
         NotificationHandler(context)
     }
 
-    // override val taskAlarmScheduler: TaskAlarmScheduler by lazy {
-    //     TaskAlarmScheduler(context)
-    // }
+    override val taskAlarmScheduler: TaskAlarmScheduler by lazy {
+        TaskAlarmScheduler(context)
+    }
 }
 

@@ -41,6 +41,7 @@
             android:name="lab06.data.NotificationBroadcastReceiver"
             android:enabled="true"
             />
+        <receiver android:name="lab06.data.AlarmReceiver" />
 
 
 

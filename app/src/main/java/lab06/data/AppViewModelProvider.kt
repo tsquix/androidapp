@@ -8,8 +8,10 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 object AppViewModelProvider {
     val Factory = viewModelFactory {
         initializer {
+            val application = (this[APPLICATION_KEY] as TodoApplication)
             ListViewModel(
-                repository =  todoApplication().container.todoTaskRepository
+                repository = application.container.todoTaskRepository,
+                scheduler = application.container.taskAlarmScheduler
             )
         }
     }

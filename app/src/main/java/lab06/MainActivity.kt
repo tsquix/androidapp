@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -84,6 +85,8 @@ import androidx.room.PrimaryKey
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import lab06.alarm.TaskAlarmScheduler
+
 import lab06.data.AppViewModelProvider
 import lab06.data.ListViewModel
 import lab06.data.NotificationBroadcastReceiver
@@ -93,6 +96,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Calendar
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -119,6 +123,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
 const val notificationID = 121
 const val channelID = "Lab06 channel"
 const val titleExtra = "title"
@@ -152,6 +157,37 @@ fun scheduleAlarm(context: Context, time: Long) {
     alarmManager.setExactAndAllowWhileIdle(
         AlarmManager.RTC_WAKEUP,
         time,
+        pendingIntent
+    )
+}
+fun scheduleTaskAlarm(context: Context, taskId: Int, title: String, deadline: Long) {
+    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+    // Ustaw alarm dzień przed terminem o tej samej godzinie
+    val calendar = Calendar.getInstance().apply {
+        timeInMillis = deadline
+        add(Calendar.DAY_OF_YEAR, -1)
+    }
+
+    // Jeśli alarm w przeszłości, nie ustawiamy
+    if (calendar.timeInMillis < System.currentTimeMillis()) return
+
+    val intent = Intent(context, TaskAlarmScheduler::class.java).apply {
+        putExtra("task_title", title)
+    }
+
+    val pendingIntent = PendingIntent.getBroadcast(
+        context,
+        taskId,
+        intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    // Alarm powtarzany co 4h
+    alarmManager.setRepeating(
+        AlarmManager.RTC_WAKEUP,
+        calendar.timeInMillis,
+        AlarmManager.INTERVAL_HOUR * 4,
         pendingIntent
     )
 }
@@ -263,7 +299,10 @@ fun ListScreen(
                 modifier = Modifier.padding(paddingValues)
             ) {
                 items(items = listUiState.items, key = { it.id }) { item ->
-                    ListItem(item = item)
+                    ListItem(
+                        item = item,
+                        onDeleteClick = { viewModel.deleteTask(it) }  // Add this line
+                    )
                 }
             }
         }
@@ -409,23 +448,24 @@ fun FormScreen(
                 }
 
                 // Preview card
-                Text(
-                    text = "Task Preview",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
-                )
-
-                // Preview card now includes id (although 0 as it's a new task)
-                ListItem(
-                    item = TodoTask(
-                        id = 0, // For preview, we use 0 as it would be auto-generated
-                        title = if (taskTitle.isEmpty()) "Task Title" else taskTitle,
-                        deadline = selectedDate,
-                        isDone = taskDone,
-                        priority = selectedPriority
-                    )
-                )
+//                Text(
+//                    text = "Task Preview",
+//                    style = MaterialTheme.typography.bodyLarge,
+//                    fontWeight = FontWeight.Bold,
+//                    modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+//                )
+//
+//                // Preview card now includes id (although 0 as it's a new task)
+//                ListItem(
+//                    item = TodoTask(
+//                        id = 0, // For preview, we use 0 as it would be auto-generated
+//                        title = if (taskTitle.isEmpty()) "Task Title" else taskTitle,
+//                        deadline = selectedDate,
+//                        isDone = taskDone,
+//                        priority = selectedPriority
+//                    ),
+//
+//                )
             }
 
             // Date picker dialog
@@ -506,7 +546,11 @@ data class TodoTask(
     val priority: Priority
 )
 @Composable
-fun ListItem(item: TodoTask, modifier: Modifier = Modifier) {
+fun ListItem(
+    item: TodoTask, 
+    modifier: Modifier = Modifier,
+    onDeleteClick: (TodoTask) -> Unit = {}
+) {
     ElevatedCard(
         modifier = modifier
             .fillMaxWidth()
@@ -586,6 +630,16 @@ fun ListItem(item: TodoTask, modifier: Modifier = Modifier) {
                         .size(24.dp)
                 )
             }
+            // Add delete icon
+            IconButton(
+                onClick = { onDeleteClick(item) }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete task",
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
         }
     }
 }
@@ -597,7 +651,8 @@ fun AppTopBar(
     navController: NavController,
     title: String,
     showBackIcon: Boolean,
-    route: String
+    route: String,
+    onDeleteClick: () -> Unit = {} // Add this parameter
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
@@ -617,6 +672,9 @@ fun AppTopBar(
         },
         actions = {
             if (route != "form") {
+                // Add delete button
+
+
                 IconButton(onClick = {
                     // Wysyłanie powiadomienia po kliknięciu w zębatkę
                     MainActivity.container.notificationHandler.showSimpleNotification()
@@ -635,15 +693,33 @@ fun AppTopBar(
             }
         }
     )
+}
+@Composable
+fun TodoApp(
+    navController: NavController,
+    viewModel: ListViewModel = viewModel(factory = AppViewModelProvider.Factory)
+) {
+    val listUiState by viewModel.listUiState.collectAsState()
 
-//} else {
-//                IconButton(onClick = { /*TODO*/ }) {
-//                    Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
-//                }
-//                IconButton(onClick = { /*TODO*/ }) {
-//                    Icon(imageVector = Icons.Default.Home, contentDescription = "Home")
-//                }
-//            }
-//        }
-//    )
+    Scaffold(
+        topBar = {
+            AppTopBar(
+                navController = navController,
+                title = "Todo App",
+                showBackIcon = false,
+                route = "list"
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.padding(padding)
+        ) {
+            items(items = listUiState.items, key = { it.id }) { task ->
+                ListItem(
+                    item = task,
+                    onDeleteClick = { viewModel.deleteTask(it) }
+                )
+            }
+        }
+    }
 }
