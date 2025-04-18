@@ -1,6 +1,6 @@
 package lab06
 
-import AppContainer
+
 import android.Manifest
 import android.app.AlarmManager
 import android.app.NotificationChannel
@@ -11,6 +11,7 @@ import android.content.Context.ALARM_SERVICE
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -66,6 +67,7 @@ import androidx.navigation.NavController
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.LaunchedEffect
@@ -73,9 +75,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -85,12 +89,20 @@ import androidx.room.PrimaryKey
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import lab06.alarm.TaskAlarmScheduler
+import lab06.data.AppContainer
 
 import lab06.data.AppViewModelProvider
+import lab06.data.FormViewModel
 import lab06.data.ListViewModel
+import lab06.data.LocalDateConverter
 import lab06.data.NotificationBroadcastReceiver
+import lab06.data.SettingsViewModel
 import lab06.data.TodoApplication
+import lab06.data.TodoTaskEntity
+import lab06.data.TodoTaskForm
 import pl.wsei.pam.lab01.R
 import java.time.Instant
 import java.time.LocalDate
@@ -243,22 +255,27 @@ fun MainAppPreview() {
 @Composable
 fun MainScreen() {
     val navController = rememberNavController()
+    val settingsViewModel: SettingsViewModel = viewModel(factory = AppViewModelProvider.Factory)
+    
+    // Add notification permission handling
     val postNotificationPermission =
         rememberPermissionState(permission = Manifest.permission.POST_NOTIFICATIONS)
+    
     LaunchedEffect(key1 = true) {
         if (!postNotificationPermission.status.isGranted) {
             postNotificationPermission.launchPermissionRequest()
         }
     }
-    // The viewModel will be scoped to this composition
-    val viewModel: ListViewModel = viewModel(factory = AppViewModelProvider.Factory)
-
+    
     NavHost(navController = navController, startDestination = "list") {
         composable("list") {
-            ListScreen(navController = navController, viewModel = viewModel)
+            ListScreen(navController = navController)
         }
         composable("form") {
-            FormScreen(navController = navController, viewModel = viewModel)
+            FormScreen(navController = navController)
+        }
+        composable("settings") {
+            SettingsScreen(navController = navController, viewModel = settingsViewModel)
         }
     }
 }
@@ -315,8 +332,11 @@ fun ListScreen(
 @Composable
 fun FormScreen(
     navController: NavController,
-    viewModel: ListViewModel = viewModel(factory = AppViewModelProvider.Factory)
+    viewModel: FormViewModel = viewModel(factory = AppViewModelProvider.Factory)
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    
     var taskTitle by remember { mutableStateOf("") }
     var selectedPriority by remember { mutableStateOf(Priority.Medium) }
     var taskDone by remember { mutableStateOf(false) }
@@ -336,20 +356,40 @@ fun FormScreen(
             FloatingActionButton(
                 shape = CircleShape,
                 onClick = {
-                    // Create a new task
-                    val newTask = TodoTask(
-                        // id will be handled by Room with autoGenerate = true
-                        title = taskTitle,
-                        deadline = selectedDate,
-                        isDone = taskDone,
-                        priority = selectedPriority
+                    viewModel.updateUiState(
+                        TodoTaskForm(
+                            title = taskTitle,
+                            deadline = LocalDateConverter.toMillis(selectedDate),
+                            isDone = taskDone,
+                            priority = selectedPriority.name
+                        )
                     )
-
-                    // Save the task using the ViewModel
-                    viewModel.saveTask(newTask)
-
-                    // Navigate back to the list
-                    navController.navigate("list")
+                    coroutineScope.launch {
+                        viewModel.save()
+                        if (viewModel.todoTaskUiState.isValid) {
+                            // Get the TaskAlarmScheduler instance
+                            val taskAlarmScheduler = MainActivity.container.taskAlarmScheduler
+                            // Schedule alarm for the new task
+                            taskAlarmScheduler.scheduleAlarmForNextTask(
+                                MainActivity.container.todoTaskRepository.getAllAsStream().first().map { task ->
+                                    TodoTaskEntity(
+                                        id = task.id,
+                                        title = task.title,
+                                        deadline = task.deadline,
+                                        isDone = task.isDone,
+                                        priority = Priority.valueOf(task.priority.name)
+                                    )
+                                }
+                            )
+                            
+                            Toast.makeText(
+                                context,
+                                "Task saved and alarm set for: ${selectedDate.format(DateTimeFormatter.ofPattern("dd MMMM yyyy"))}",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            navController.navigate("list")
+                        }
+                    }
                 },
                 content = {
                     Icon(
@@ -368,16 +408,20 @@ fun FormScreen(
                     .fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Title input
                 OutlinedTextField(
                     value = taskTitle,
                     onValueChange = { taskTitle = it },
                     label = { Text("Task Title") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    isError = viewModel.todoTaskUiState.titleError != null,
+                    supportingText = {
+                        if (viewModel.todoTaskUiState.titleError != null) {
+                            Text(viewModel.todoTaskUiState.titleError!!)
+                        }
+                    }
                 )
 
-                // Priority selection
                 Text(
                     text = "Task Priority",
                     style = MaterialTheme.typography.bodyLarge,
@@ -397,8 +441,6 @@ fun FormScreen(
                         )
                     }
                 }
-
-                // Date selection
                 Text(
                     text = "Task Deadline",
                     style = MaterialTheme.typography.bodyLarge,
@@ -429,7 +471,6 @@ fun FormScreen(
                     }
                 }
 
-                // Task status
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -447,28 +488,9 @@ fun FormScreen(
                     )
                 }
 
-                // Preview card
-//                Text(
-//                    text = "Task Preview",
-//                    style = MaterialTheme.typography.bodyLarge,
-//                    fontWeight = FontWeight.Bold,
-//                    modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
-//                )
-//
-//                // Preview card now includes id (although 0 as it's a new task)
-//                ListItem(
-//                    item = TodoTask(
-//                        id = 0, // For preview, we use 0 as it would be auto-generated
-//                        title = if (taskTitle.isEmpty()) "Task Title" else taskTitle,
-//                        deadline = selectedDate,
-//                        isDone = taskDone,
-//                        priority = selectedPriority
-//                    ),
-//
-//                )
+        
             }
 
-            // Date picker dialog
             if (showDatePicker) {
                 DateDialogPicker(
                     selectedDate = selectedDate,
@@ -522,8 +544,6 @@ fun DateDialogPicker(
     }
 }
 
-
-// Update todoTasks() function to include IDs
 fun todoTasks(): List<TodoTask> {
     return listOf(
         TodoTask(id = 1, title = "Programming", deadline = LocalDate.of(2024, 4, 18), isDone = false, priority = Priority.Low),
@@ -565,10 +585,6 @@ fun ListItem(
                 .fillMaxSize()
                 .padding(16.dp)
         ) {
-            // Optional: Display task ID (only for debugging/development)
-            // Text(text = "ID: ${item.id}", style = MaterialTheme.typography.labelSmall)
-
-            // Main content row
             Row(
                 modifier = Modifier
                     .fillMaxWidth(),
@@ -614,10 +630,7 @@ fun ListItem(
                 }
             }
 
-            // Spacer to push the icon to the bottom
             Spacer(modifier = Modifier.weight(1f))
-
-            // Icon at the bottom center
             Box(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center
@@ -630,7 +643,7 @@ fun ListItem(
                         .size(24.dp)
                 )
             }
-            // Add delete icon
+
             IconButton(
                 onClick = { onDeleteClick(item) }
             ) {
@@ -651,8 +664,7 @@ fun AppTopBar(
     navController: NavController,
     title: String,
     showBackIcon: Boolean,
-    route: String,
-    onDeleteClick: () -> Unit = {} // Add this parameter
+    route: String
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
@@ -672,28 +684,38 @@ fun AppTopBar(
         },
         actions = {
             if (route != "form") {
-                // Add delete button
-
-
-                IconButton(onClick = {
-                    // Wysyłanie powiadomienia po kliknięciu w zębatkę
-                    MainActivity.container.notificationHandler.showSimpleNotification()
-                }) {
-                    Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
-                }
-
-                OutlinedButton(
-                    onClick = { navController.navigate("list") }
+                IconButton(
+                    onClick = { navController.navigate("settings") }
                 ) {
-                    Text(
-                        text = "Zapisz",
-                        fontSize = 18.sp
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Settings"
                     )
                 }
             }
         }
     )
 }
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TodoTopAppBar(
+    navigateToSettings: () -> Unit,
+    navController: NavController,
+    viewModel: ListViewModel = viewModel(factory = AppViewModelProvider.Factory)
+) {
+    TopAppBar(
+        title = { Text(text = "Todo App") },
+        actions = {
+            IconButton(onClick = navigateToSettings) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings"
+                )
+            }
+        }
+    )
+}
+
 @Composable
 fun TodoApp(
     navController: NavController,
@@ -720,6 +742,77 @@ fun TodoApp(
                     onDeleteClick = { viewModel.deleteTask(it) }
                 )
             }
+        }
+    }
+}
+
+@Composable
+fun SettingsScreen(
+    navController: NavController,
+    viewModel: SettingsViewModel
+) {
+    val settings by viewModel.settings.collectAsState()
+
+    Scaffold(
+        topBar = {
+            AppTopBar(
+                navController = navController,
+                title = "Notification Settings",
+                showBackIcon = true,
+                route = "list"
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .padding(16.dp)
+                .fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text("Days before deadline", style = MaterialTheme.typography.titleMedium)
+            Slider(
+                value = settings.daysBeforeDeadline.toFloat(),
+                onValueChange = { 
+                    viewModel.updateSettings(settings.copy(daysBeforeDeadline = it.toInt()))
+                },
+                valueRange = 0f..7f,
+                steps = 6
+            )
+            Text("${settings.daysBeforeDeadline} days")
+
+            Text("Additional hours before deadline", style = MaterialTheme.typography.titleMedium)
+            Slider(
+                value = settings.hoursBeforeDeadline.toFloat(),
+                onValueChange = { 
+                    viewModel.updateSettings(settings.copy(hoursBeforeDeadline = it.toInt()))
+                },
+                valueRange = 0f..23f,
+                steps = 22
+            )
+            Text("${settings.hoursBeforeDeadline} hours")
+
+            Text("Number of reminders", style = MaterialTheme.typography.titleMedium)
+            Slider(
+                value = settings.repeatCount.toFloat(),
+                onValueChange = { 
+                    viewModel.updateSettings(settings.copy(repeatCount = it.toInt()))
+                },
+                valueRange = 1f..5f,
+                steps = 3
+            )
+            Text("${settings.repeatCount} reminders")
+
+            Text("Hours between reminders", style = MaterialTheme.typography.titleMedium)
+            Slider(
+                value = settings.repeatIntervalHours.toFloat(),
+                onValueChange = { 
+                    viewModel.updateSettings(settings.copy(repeatIntervalHours = it.toInt()))
+                },
+                valueRange = 1f..12f,
+                steps = 10
+            )
+            Text("Every ${settings.repeatIntervalHours} hours")
         }
     }
 }

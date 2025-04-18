@@ -1,7 +1,6 @@
 package lab06.data
 
-import AppContainer
-import AppDataContainer
+
 import android.app.Application
 
 class TodoApplication: Application() {

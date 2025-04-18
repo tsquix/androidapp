@@ -17,7 +17,7 @@ data class TodoTaskEntity(
 ) {
     fun toModel(): TodoTask {
         return TodoTask(
-            id = id, // Keep id as Int, don't convert to String
+            id = id,
             deadline = deadline,
             isDone = isDone,
             priority = priority,
@@ -28,7 +28,7 @@ data class TodoTaskEntity(
     companion object {
         fun fromModel(model: TodoTask): TodoTaskEntity {
             return TodoTaskEntity(
-                id = model.id, // Since model.id is already Int, no need for conversion
+                id = model.id,
                 title = model.title,
                 priority = model.priority,
                 isDone = model.isDone,
